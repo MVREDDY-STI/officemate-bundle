@@ -1,0 +1,92 @@
+version: '3.9'
+
+services:
+  # ── PostgreSQL ─────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: officemate_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-officemate}
+      POSTGRES_USER:     ${POSTGRES_USER:-solum}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-solum} -d $${POSTGRES_DB:-officemate}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── MinIO object storage ───────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: officemate_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:     ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin123}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "9001:9001"   # MinIO web console (dev convenience; remove in prod)
+
+  # ── Backend (Bun.js) ──────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: officemate_backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL:    postgresql://${POSTGRES_USER:-solum}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-officemate}
+      JWT_SECRET:      ${JWT_SECRET:-change_me_to_a_long_random_secret_at_least_32_chars}
+      PORT:            3000
+      NODE_ENV:        production
+      ALLOWED_ORIGINS: http://localhost,http://localhost:80
+      # MinIO / S3 config — empty S3_PUBLIC_URL → backend returns root-relative /uploads/…
+      # Nginx proxies /uploads/ → MinIO so the browser uses the same origin
+      S3_ENDPOINT:     http://minio:9000
+      S3_ACCESS_KEY:   ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY:   ${S3_SECRET_KEY:-minioadmin123}
+      S3_BUCKET:       ${S3_BUCKET:-officemate}
+      S3_PUBLIC_URL:   ""
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Frontend (Nginx — proxies /api/, /ws, /uploads/) ──────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Empty = relative URLs; Nginx proxies /api/ → backend, /uploads/ → minio
+        VITE_API_URL: ""
+    container_name: officemate_frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:
+    name: officemate_postgres_data
+  minio_data:
+    name: officemate_minio_data

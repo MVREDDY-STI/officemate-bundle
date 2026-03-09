@@ -106,7 +106,64 @@ async function s3Upload(buffer: Uint8Array, key: string, contentType: string): P
   return S3_PUBLIC_URL ? `${S3_PUBLIC_URL}/${key}` : `/${key}`;
 }
 
-// ── Ensure MinIO bucket exists on startup ────────────────────
+// ── Authenticated S3 request (reusable) ─────────────────────
+// Used for bucket management (HEAD, PUT bucket, PUT policy)
+async function s3Req(
+  method: string,
+  canonPath: string,   // e.g. '/officemate'
+  canonQuery: string,  // e.g. '' or 'policy='
+  body: Uint8Array,
+  contentType: string,
+): Promise<Response> {
+  const host    = new URL(S3_ENDPOINT!).host;
+  const now     = new Date();
+  const dateStamp = now.toISOString().replace(/[:-]|\.\d{3}/g, '').slice(0, 8);
+  const amzDate   = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const payload   = await sha256Hex(body);
+
+  const canonHeaders =
+    `content-type:${contentType}\nhost:${host}\nx-amz-content-sha256:${payload}\nx-amz-date:${amzDate}\n`;
+  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
+  const canonRequest  = [method, canonPath, canonQuery, canonHeaders, signedHeaders, payload].join('\n');
+
+  const scope        = `${dateStamp}/${S3_REGION}/s3/aws4_request`;
+  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, scope, await sha256Hex(canonRequest)].join('\n');
+
+  const enc    = new TextEncoder();
+  const sigKey = await hmac(
+    await hmac(await hmac(await hmac(enc.encode(`AWS4${S3_SECRET_KEY}`), dateStamp), S3_REGION), 's3'),
+    'aws4_request',
+  );
+  const signature    = toHex(await hmac(sigKey, stringToSign));
+  const authorization =
+    `AWS4-HMAC-SHA256 Credential=${S3_ACCESS_KEY}/${scope},SignedHeaders=${signedHeaders},Signature=${signature}`;
+
+  const url = canonQuery
+    ? `${S3_ENDPOINT}${canonPath}?${canonQuery}`
+    : `${S3_ENDPOINT}${canonPath}`;
+
+  return fetch(url, {
+    method,
+    headers: {
+      'Content-Type':          contentType,
+      'Host':                  host,
+      'X-Amz-Content-Sha256': payload,
+      'X-Amz-Date':           amzDate,
+      'Authorization':         authorization,
+    },
+    body: body.length > 0 ? body : undefined,
+  });
+}
+
+// ── Ensure MinIO bucket exists and is publicly readable ──────
+//
+// Root cause of "image appears then disappears":
+//   MinIO buckets are private by default. The nginx proxy serves images
+//   from MinIO without auth credentials → MinIO returns 403 → the <img>
+//   element renders (appears) then onError hides it (disappears).
+//
+// Fix: create the bucket (if missing) and set a public-read policy so
+//   nginx can proxy images to browsers without credentials.
 
 export async function ensureStorageReady(): Promise<void> {
   if (!USE_S3) {
@@ -115,16 +172,48 @@ export async function ensureStorageReady(): Promise<void> {
     return;
   }
 
-  // HEAD bucket — create if missing
+  const enc        = new TextEncoder();
+  const bucketPath = `/${S3_BUCKET}`;
+
   try {
-    const res = await fetch(`${S3_ENDPOINT}/${S3_BUCKET}`, { method: 'HEAD' });
-    if (res.status === 404) {
-      const create = await fetch(`${S3_ENDPOINT}/${S3_BUCKET}`, { method: 'PUT' });
-      if (!create.ok) throw new Error(`Bucket create failed: ${create.status}`);
+    // ── 1. HEAD bucket (authenticated) ──────────────────────────
+    const head = await s3Req('HEAD', bucketPath, '', new Uint8Array(0), 'application/xml');
+
+    if (head.status === 404) {
+      // ── 2. Create bucket ───────────────────────────────────────
+      const create = await s3Req('PUT', bucketPath, '', new Uint8Array(0), 'application/xml');
+      if (!create.ok && create.status !== 409) {
+        throw new Error(`Bucket create failed: ${create.status}`);
+      }
+      logInfo('Storage: bucket created', { bucket: S3_BUCKET });
+    } else if (!head.ok && head.status !== 403) {
+      // 403 = bucket exists but we lack list permission (still usable for PUT/GET object)
+      throw new Error(`Bucket HEAD failed: ${head.status}`);
     }
+
+    // ── 3. Set public-read policy (allow anonymous GET on all objects) ──
+    const policy = JSON.stringify({
+      Version: '2012-10-17',
+      Statement: [{
+        Effect:    'Allow',
+        Principal: { AWS: ['*'] },
+        Action:    ['s3:GetObject'],
+        Resource:  [`arn:aws:s3:::${S3_BUCKET}/*`],
+      }],
+    });
+    const policyBuf = enc.encode(policy);
+    const policyRes = await s3Req('PUT', bucketPath, 'policy=', policyBuf, 'application/json');
+    if (!policyRes.ok) {
+      // Non-fatal: log warning but don't crash — images may not load publicly
+      const txt = await policyRes.text().catch(() => '');
+      logWarn('Storage: could not set public-read policy', { status: policyRes.status, body: txt });
+    } else {
+      logInfo('Storage: bucket policy set to public-read', { bucket: S3_BUCKET });
+    }
+
     logInfo('Storage: MinIO/S3 ready', { endpoint: S3_ENDPOINT, bucket: S3_BUCKET });
   } catch (e) {
-    logWarn('Storage: S3 bucket check failed, uploads may not work', { error: String(e) });
+    logWarn('Storage: S3 setup failed — uploads may not work', { error: String(e) });
   }
 }
 

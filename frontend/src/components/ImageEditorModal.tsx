@@ -9,7 +9,7 @@ import {
   Check, X, RefreshCw, Maximize2, Minimize2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { apiUpload, BASE } from '../services/api';
+import { apiUpload } from '../services/api';
 
 // ─── Canvas dimensions for preview ─────────────────────────────
 const CANVAS_W = 620;
@@ -191,7 +191,9 @@ export default function ImageEditorModal({ file, onClose, onSave }: Props) {
       const fd = new FormData();
       fd.append('file', blob, `edited-image-${Date.now()}.jpg`);
       const result = await apiUpload<{ url: string }>('/api/v1/uploads', fd);
-      const url = result.url.startsWith('http') ? result.url : `${BASE}${result.url}`;
+      // Use the URL as-is: absolute URLs are kept, root-relative (/uploads/...)
+      // are served by nginx which proxies to MinIO — never prepend the API base.
+      const url = result.url;
       toast.success('Image saved!');
       onSave(url);
     } catch (err: any) {

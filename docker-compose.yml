@@ -40,6 +40,26 @@ services:
     ports:
       - "9001:9001"   # MinIO web console (dev convenience; remove in prod)
 
+  # ── MinIO one-shot init: create bucket + set public-read ──
+  # Runs once after MinIO is healthy; backend waits for it to complete.
+  minio-init:
+    image: minio/mc:latest
+    container_name: officemate_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: on-failure
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-minioadmin123} &&
+        mc mb --ignore-existing local/$${S3_BUCKET:-officemate} &&
+        mc anonymous set download local/$${S3_BUCKET:-officemate} &&
+        echo 'MinIO: bucket ready and public-read set'
+      "
+    environment:
+      MINIO_ROOT_USER:     ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin123}
+
   # ── Backend (Bun.js) ──────────────────────────────────────
   backend:
     build:
@@ -52,6 +72,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL:    postgresql://${POSTGRES_USER:-solum}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-officemate}
       JWT_SECRET:      ${JWT_SECRET:-change_me_to_a_long_random_secret_at_least_32_chars}

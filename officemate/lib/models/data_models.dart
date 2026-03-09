@@ -19,7 +19,7 @@ class MeetingRoom {
     final end   = _slotToTime(b['end_slot']   as int? ?? 1);
     return MeetingRoom(
       id:         index,
-      title:      (b['title'] as String? ?? 'Meeting').toUpperCase(),
+      title:      b['title'] as String? ?? 'Meeting',
       roomNumber: (b['room_name'] as String? ?? ''),
       time:       '$start to $end',
       team:       b['user_name'] as String? ?? '',

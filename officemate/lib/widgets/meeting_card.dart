@@ -8,7 +8,7 @@ class MeetingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final timeSz  = clampW(context, 10, 1.05, 28); // slightly larger, medium weight
+    final timeSz  = clampW(context, 11, 1.15, 30); // slightly larger, light weight
     final nameSz  = clampW(context, 9,  0.95, 24); // booker name
     final titleSz = clampW(context, 9,  0.95, 24); // subject
     final vPad    = clampH(context, 10, 1.8,  32); // more vertical breathing room
@@ -26,7 +26,7 @@ class MeetingCard extends StatelessWidget {
                 meeting.time,
                 style: kPretendard(
                   fontSize: timeSz,
-                  fontWeight: FontWeight.w500, // medium — less bold than before
+                  fontWeight: FontWeight.w300, // light
                   color: Colors.white,
                   letterSpacing: 0.2,
                 ),
@@ -62,7 +62,7 @@ class MeetingCard extends StatelessWidget {
             maxLines: 1,
           ),
 
-          SizedBox(height: vPad * 0.65),
+          SizedBox(height: vPad * 0.7),
           Container(
             height: 0.5,
             color: Colors.white.withValues(alpha: 0.15),

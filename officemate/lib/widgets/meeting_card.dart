@@ -11,8 +11,8 @@ class MeetingCard extends StatelessWidget {
   Widget build(BuildContext context) {
     // Derive a readable accent from the theme (lighter lavender tint)
     final accent  = lightenColor(themeColor, 0.44);
-    final timeSz  = clampW(context, 9,  0.88, 22);
-    final titleSz = clampW(context, 11, 1.1,  30);
+    final timeSz  = clampW(context, 10, 1.0, 26);
+    final titleSz = clampW(context, 10, 0.95, 26);
     final nameSz  = clampW(context, 8,  0.82, 20);
     final iconSz  = clampW(context, 10, 0.95, 22);
     final vPad    = clampH(context, 10, 1.8,  32);
@@ -25,31 +25,42 @@ class MeetingCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Row 1: clock icon + time (accent colour) ─────────
-          Row(
-            children: [
-              Icon(Icons.access_time_outlined, color: accent, size: iconSz),
-              SizedBox(width: clampW(context, 4, 0.4, 10)),
-              Text(
-                displayTime,
-                style: kPretendard(
-                  fontSize: timeSz,
-                  fontWeight: FontWeight.w300,
-                  color: accent,
-                  letterSpacing: 0.2,
+          // ── Row 1: clock icon + time (highlighted pill) ──────
+          Container(
+            padding: EdgeInsets.symmetric(
+              horizontal: clampW(context, 6, 0.6, 14),
+              vertical:   clampH(context, 3, 0.4, 8),
+            ),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.access_time_outlined, color: accent, size: iconSz),
+                SizedBox(width: clampW(context, 4, 0.4, 10)),
+                Text(
+                  displayTime,
+                  style: kPretendard(
+                    fontSize: timeSz,
+                    fontWeight: FontWeight.w400,
+                    color: accent,
+                    letterSpacing: 0.2,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
 
           SizedBox(height: clampH(context, 5, 0.55, 12)),
 
-          // ── Row 2: meeting title (white, bold) ───────────────
+          // ── Row 2: meeting title (white, normal) ─────────────
           Text(
             meeting.title,
             style: kPretendard(
               fontSize: titleSz,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w400,
               color: Colors.white,
               letterSpacing: 0.15,
             ),

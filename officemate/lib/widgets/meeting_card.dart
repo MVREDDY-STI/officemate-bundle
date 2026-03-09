@@ -8,33 +8,35 @@ class MeetingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final timeSz  = clampW(context, 8,  0.85, 22);
-    final titleSz = clampW(context, 7,  0.75, 18);
-    final vPad    = clampH(context, 6,  1.2,  22);
+    final timeSz  = clampW(context, 10, 1.05, 28); // slightly larger, medium weight
+    final nameSz  = clampW(context, 9,  0.95, 24); // booker name
+    final titleSz = clampW(context, 9,  0.95, 24); // subject
+    final vPad    = clampH(context, 10, 1.8,  32); // more vertical breathing room
 
     return Padding(
       padding: EdgeInsets.only(bottom: vPad),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Row 1: time (left, semi-bold) + booker name (right, ellipsis) ──
+          // ── Row 1: time (left) + booker name (right, ellipsis) ─
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Text(
                 meeting.time,
                 style: kPretendard(
                   fontSize: timeSz,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w500, // medium — less bold than before
                   color: Colors.white,
-                  letterSpacing: 0.3,
+                  letterSpacing: 0.2,
                 ),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   meeting.team,
                   style: kPretendard(
-                    fontSize: timeSz,
+                    fontSize: nameSz,
                     fontWeight: FontWeight.w400,
                     color: Colors.white60,
                   ),
@@ -45,7 +47,7 @@ class MeetingCard extends StatelessWidget {
             ],
           ),
 
-          SizedBox(height: clampH(context, 2, 0.3, 6)),
+          SizedBox(height: clampH(context, 4, 0.5, 10)),
 
           // ── Row 2: meeting subject / title ──────────────────
           Text(
@@ -54,16 +56,16 @@ class MeetingCard extends StatelessWidget {
               fontSize: titleSz,
               fontWeight: FontWeight.w400,
               color: Colors.white54,
-              letterSpacing: 0.2,
+              letterSpacing: 0.15,
             ),
             overflow: TextOverflow.ellipsis,
             maxLines: 1,
           ),
 
-          SizedBox(height: vPad * 0.5),
+          SizedBox(height: vPad * 0.65),
           Container(
             height: 0.5,
-            color: Colors.white.withValues(alpha: 0.12),
+            color: Colors.white.withValues(alpha: 0.15),
           ),
         ],
       ),

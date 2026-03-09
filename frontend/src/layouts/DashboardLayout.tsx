@@ -30,6 +30,10 @@ export default function DashboardLayout() {
     { label: 'Support',             path: '/dashboard/support' },
     { label: 'Manage guests',       path: '/dashboard/guests' },
     { label: 'About Us',            path: '/dashboard/about' },
+    ...(isAdmin ? [
+      { label: 'TV Setup',        path: '/dashboard/tv-setup' },
+      { label: 'User Management', path: '/dashboard/users' },
+    ] : []),
   ];
 
   const handleLogout = () => {

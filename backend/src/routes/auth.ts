@@ -47,6 +47,31 @@ function json(data: unknown, status = 200): Response {
 
 export async function handleAuth(req: Request, path: string): Promise<Response | null> {
 
+  // ── POST /api/v1/auth/signup ─────────────────────────────
+  if (path === '/api/v1/auth/signup' && req.method === 'POST') {
+    try {
+      const body     = await req.json() as Record<string, unknown>;
+      const name     = vString(body.name,     'name',     { min: 2, max: 100 });
+      const email    = vEmail(body.email);
+      const password = vString(body.password, 'password', { min: 8, max: 128 });
+
+      const existing = await db.query('SELECT id FROM users WHERE email = $1', [email]);
+      if (existing.rows[0]) return json({ error: 'Email already registered' }, 409);
+
+      const hashed = await hashPassword(password);
+      await db.query(
+        'INSERT INTO users (email, password_hash, name, is_approved) VALUES ($1, $2, $3, false)',
+        [email, hashed, name],
+      );
+
+      return json({ message: 'Registration submitted, awaiting admin approval' }, 201);
+    } catch (e) {
+      if (e instanceof ValidationError) return validationErrorResponse(e);
+      logError('auth-signup', e);
+      return json({ error: 'Server error' }, 500);
+    }
+  }
+
   // ── POST /api/v1/auth/login ──────────────────────────────
   if (path === '/api/v1/auth/login' && req.method === 'POST') {
     const ip = getIp(req);
@@ -59,7 +84,7 @@ export async function handleAuth(req: Request, path: string): Promise<Response |
       const password = vString(body.password, 'password', { min: 1, max: 128 });
 
       const result = await db.query(
-        'SELECT id, email, name, role, password_hash FROM users WHERE email = $1',
+        'SELECT id, email, name, role, password_hash, is_approved FROM users WHERE email = $1',
         [email],
       );
       const user = result.rows[0];
@@ -67,6 +92,11 @@ export async function handleAuth(req: Request, path: string): Promise<Response |
       // Always verify (even on miss) to prevent timing-based user enumeration
       const isValid = user ? await verifyPassword(password, user.password_hash) : false;
       if (!user || !isValid) return json({ error: 'Invalid credentials' }, 401);
+
+      // Check admin approval before issuing tokens
+      if (!user.is_approved) {
+        return json({ error: 'approval_pending', message: 'Your account is pending admin approval.' }, 403);
+      }
 
       // Transparent upgrade: re-hash legacy SHA-256 → bcrypt on next login
       if (user.password_hash && !user.password_hash.startsWith('$2')) {

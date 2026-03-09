@@ -1,6 +1,6 @@
 import db from '../db/client';
 import { authenticate } from '../middleware/auth';
-import { broadcast } from '../ws/hub';
+import { broadcast, broadcastToDevices } from '../ws/hub';
 import {
   vUuid, vDate, vInt, vStringOptional,
   parsePagination, ValidationError, validationErrorResponse,
@@ -14,6 +14,20 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+/** Notify TV displays that are linked to the affected room */
+async function notifyDisplaysForRoom(roomId: string): Promise<void> {
+  try {
+    const result = await db.query(
+      'SELECT id FROM tv_displays WHERE room_id = $1',
+      [roomId],
+    );
+    if (result.rows.length > 0) {
+      const displayIds = result.rows.map((r: { id: string }) => r.id);
+      broadcastToDevices(displayIds, 'display:booking_updated', { room_id: roomId });
+    }
+  } catch { /* non-critical — don't fail the booking operation */ }
+}
+
 export async function handleBookings(req: Request, path: string): Promise<Response | null> {
 
   // GET /api/v1/bookings?date=YYYY-MM-DD  — all confirmed bookings for a day (availability)
@@ -25,10 +39,11 @@ export async function handleBookings(req: Request, path: string): Promise<Respon
       const date = vDate(dateParam, 'date');
 
       const result = await db.query(
-        `SELECT b.id, b.room_id, r.name as room_name, b.user_id, b.booking_date,
-                b.start_slot, b.end_slot, b.title, b.status
+        `SELECT b.id, b.room_id, r.name as room_name, b.user_id, u.name as user_name,
+                b.booking_date, b.start_slot, b.end_slot, b.title, b.status
          FROM bookings b
          JOIN rooms r ON r.id = b.room_id
+         JOIN users u ON u.id = b.user_id
          WHERE b.booking_date = $1 AND b.status = 'confirmed'
          ORDER BY b.room_id, b.start_slot`,
         [date],
@@ -102,6 +117,7 @@ export async function handleBookings(req: Request, path: string): Promise<Respon
 
       const booking = result.rows[0];
       broadcast('booking:created', booking);
+      notifyDisplaysForRoom(room_id);
       return json(booking, 201);
     } catch (e: any) {
       if (e instanceof ValidationError) return validationErrorResponse(e);
@@ -127,6 +143,7 @@ export async function handleBookings(req: Request, path: string): Promise<Respon
       );
       if (!result.rows[0]) return json({ error: 'Not found or already cancelled' }, 404);
       broadcast('booking:cancelled', { bookingId: id });
+      notifyDisplaysForRoom(result.rows[0].room_id);
       return json(result.rows[0]);
     } catch (e: any) {
       if (e instanceof ValidationError) return validationErrorResponse(e);

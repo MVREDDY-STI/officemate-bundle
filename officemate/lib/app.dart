@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'theme/app_theme.dart';
+import 'services/app_config.dart';
 import 'screens/home_screen.dart';
+import 'screens/setup_screen.dart';
 
 class OfficeMateApp extends StatelessWidget {
   const OfficeMateApp({super.key});
@@ -12,11 +14,11 @@ class OfficeMateApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: kSidebarBg),
-        // Set Pretendard as the global default font
         fontFamily: kFont,
         useMaterial3: true,
       ),
-      home: const HomeScreen(),
+      // Route to setup if not configured, otherwise go home
+      home: AppConfig.isConfigured ? const HomeScreen() : const SetupScreen(),
     );
   }
 }

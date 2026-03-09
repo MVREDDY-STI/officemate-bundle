@@ -461,7 +461,7 @@ export default function Home() {
         <div style={{ borderRadius: '12px', overflow: 'hidden', width: '100%', height: '300px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
           <iframe
             title="Solum Technologies India"
-            src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3887.4!2d77.5898906!3d13.070118!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3bae17916e702a0b%3A0xd20b79062ded54df!2sSolum+Technologies+India+Private+Limited!5e0!3m2!1sen!2sin!4v1709559000000!5m2!1sen!2sin"
+            src="https://maps.google.com/maps?q=Solum+Technologies+India+Private+Limited,+Bengaluru&output=embed&z=17"
             width="100%"
             height="300"
             style={{ border: 0, display: 'block' }}

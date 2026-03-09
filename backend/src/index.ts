@@ -1,6 +1,6 @@
 import { corsHeaders, optionsResponse } from './middleware/cors';
 import { authenticateWs } from './middleware/auth';
-import { addClient, removeClient } from './ws/hub';
+import { addClient, removeClient, addDeviceClient, removeDeviceClient } from './ws/hub';
 import { apiLimiter, tooManyRequests } from './middleware/rateLimit';
 import { createRequestId, logRequest, logStartup, withRequestMeta } from './middleware/logger';
 import { ensureStorageReady } from './services/storage';
@@ -18,6 +18,9 @@ import { handleUsers }    from './routes/users';
 import { handleTeam }     from './routes/team';
 import { handleTeams }    from './routes/teams';
 import { handleUploads }  from './routes/uploads';
+import { handleDisplays } from './routes/displays';
+import { handleSlides }   from './routes/slides';
+import { handleLogo }     from './routes/logo';
 import { openApiSpec, swaggerUiHtml } from './swagger/spec';
 import db from './db/client';
 
@@ -49,19 +52,47 @@ const server = Bun.serve({
   port: PORT,
 
   // ── WebSocket upgrade ────────────────────────────────────
-  fetch(req, server) {
+  async fetch(req, server) {
     const url    = new URL(req.url);
     const origin = req.headers.get('Origin') ?? undefined;
 
     // CORS preflight
     if (req.method === 'OPTIONS') return optionsResponse(req);
 
-    // WebSocket upgrade at /ws
+    // WebSocket upgrade at /ws  (user JWT auth)
     if (url.pathname === '/ws') {
       try {
         const user     = authenticateWs(req);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const upgraded = server.upgrade(req, { data: { userId: user.id } } as any);
+        const upgraded = server.upgrade(req, { data: { userId: user.id, clientType: 'user' } } as any);
+        if (upgraded) return undefined as any;
+        return json({ error: 'WebSocket upgrade failed' }, 426);
+      } catch (e: any) {
+        return json({ error: e.message ?? 'Unauthorized' }, 401);
+      }
+    }
+
+    // WebSocket upgrade at /ws/display  (device token auth)
+    if (url.pathname === '/ws/display') {
+      try {
+        const token = url.searchParams.get('device_token');
+        if (!token) return json({ error: 'Missing device_token' }, 401);
+
+        const dbResult = await db.query(
+          'SELECT id FROM tv_displays WHERE device_token = $1',
+          [token],
+        );
+        if (!dbResult.rows[0]) return json({ error: 'Invalid device token' }, 401);
+        const displayId = dbResult.rows[0].id;
+
+        // Mark online
+        await db.query(
+          'UPDATE tv_displays SET is_online = TRUE, last_seen_at = NOW() WHERE id = $1',
+          [displayId],
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const upgraded = server.upgrade(req, { data: { displayId, clientType: 'device' } } as any);
         if (upgraded) return undefined as any;
         return json({ error: 'WebSocket upgrade failed' }, 426);
       } catch (e: any) {
@@ -91,9 +122,18 @@ const server = Bun.serve({
   // ── WebSocket handlers ───────────────────────────────────
   websocket: {
     open(ws) {
-      const client = addClient(ws as unknown as WebSocket, (ws.data as any).userId);
-      (ws as any)._client = client;
-      ws.send(JSON.stringify({ event: 'connected', data: { message: 'Welcome to SOLUM Officemate live updates' } }));
+      const data = ws.data as any;
+      if (data.clientType === 'device') {
+        const client = addDeviceClient(ws as unknown as WebSocket, data.displayId);
+        (ws as any)._client = client;
+        (ws as any)._clientType = 'device';
+        ws.send(JSON.stringify({ event: 'connected', data: { message: 'Display connected' } }));
+      } else {
+        const client = addClient(ws as unknown as WebSocket, data.userId);
+        (ws as any)._client = client;
+        (ws as any)._clientType = 'user';
+        ws.send(JSON.stringify({ event: 'connected', data: { message: 'Welcome to SOLUM Officemate live updates' } }));
+      }
     },
     message(ws, message) {
       try {
@@ -101,9 +141,21 @@ const server = Bun.serve({
         if (action === 'ping') ws.send(JSON.stringify({ event: 'pong' }));
       } catch { /* ignore malformed messages */ }
     },
-    close(ws) {
+    async close(ws) {
       const client = (ws as any)._client;
-      if (client) removeClient(client);
+      const clientType = (ws as any)._clientType;
+      if (clientType === 'device') {
+        if (client) removeDeviceClient(client);
+        // Mark display offline
+        try {
+          await db.query(
+            'UPDATE tv_displays SET is_online = FALSE WHERE id = $1',
+            [(ws.data as any).displayId],
+          );
+        } catch { /* non-critical */ }
+      } else {
+        if (client) removeClient(client);
+      }
     },
   },
 });
@@ -112,6 +164,9 @@ const server = Bun.serve({
 const ROUTE_HANDLERS = [
   handleAuth,
   handleUploads,
+  handleLogo,
+  handleDisplays,
+  handleSlides,
   handleContent,
   handleRooms,
   handleBookings,

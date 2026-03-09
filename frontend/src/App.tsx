@@ -16,6 +16,8 @@ const Events = lazy(() => import('./pages/Events'));
 const ServiceStore = lazy(() => import('./pages/ServiceStore'));
 const Support = lazy(() => import('./pages/Support'));
 const ManageGuests = lazy(() => import('./pages/ManageGuests'));
+const TvSetup        = lazy(() => import('./pages/TvSetup'));
+const UserManagement = lazy(() => import('./pages/UserManagement'));
 
 function App() {
   return (
@@ -64,7 +66,9 @@ function App() {
               <Route path="events" element={<Events />} />
               <Route path="service" element={<ServiceStore />} />
               <Route path="support" element={<Support />} />
-              <Route path="guests" element={<ManageGuests />} />
+              <Route path="guests"    element={<ManageGuests />} />
+              <Route path="tv-setup" element={<TvSetup />} />
+              <Route path="users"   element={<UserManagement />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />

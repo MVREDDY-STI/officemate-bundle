@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { apiPost } from '../services/api';
 
 type Role = 'admin' | 'user';
+type LoginResult = 'ok' | 'invalid' | 'approval_pending';
 
 interface User {
   email: string;
@@ -22,7 +23,7 @@ interface ApiAuthResponse {
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<LoginResult>;
   logout: () => void;
   isAdmin: boolean;
 }
@@ -44,10 +45,10 @@ function getStoredUser(): User | null {
   }
 }
 
-function persistSession(user: User, token?: string): void {
+function persistSession(user: User, token?: string, refreshToken?: string): void {
   sessionStorage.setItem('solum_user', JSON.stringify(user));
   if (token) {
-    sessionStorage.setItem('solum_auth', JSON.stringify({ token }));
+    sessionStorage.setItem('solum_auth', JSON.stringify({ token, refreshToken: refreshToken ?? null }));
   } else {
     // Remove any stale token when using fallback
     sessionStorage.removeItem('solum_auth');
@@ -57,24 +58,27 @@ function persistSession(user: User, token?: string): void {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(getStoredUser);
 
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const login = async (email: string, password: string): Promise<LoginResult> => {
     // Try API first
     try {
       const res = await apiPost<ApiAuthResponse>('/api/v1/auth/login', { email, password });
       const userData: User = { email: res.user.email, role: res.user.role, name: res.user.name };
       setUser(userData);
-      persistSession(userData, res.token);
-      return true;
-    } catch {
+      persistSession(userData, res.token, res.refreshToken);
+      return 'ok';
+    } catch (e: any) {
+      // Check for approval_pending 403 — api.ts throws with body text as message
+      if (e.message?.includes('approval_pending')) return 'approval_pending';
+
       // API unreachable — fall back to hardcoded credentials
       const found = FALLBACK_USERS.find(u => u.email === email && u.password === password);
       if (found) {
         const userData: User = { email: found.email, role: found.role, name: found.name };
         setUser(userData);
         persistSession(userData);
-        return true;
+        return 'ok';
       }
-      return false;
+      return 'invalid';
     }
   };
 

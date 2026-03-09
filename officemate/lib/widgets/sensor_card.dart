@@ -9,11 +9,11 @@ class SensorCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color    = Color(sensor.colorHex);
-    final iconSz   = tvIcon(context, 22);
-    final titleSz  = clampW(context, 9, 0.85, 22);
-    final valSz    = clampW(context, 16, 1.4, 48);
-    final statusSz = clampW(context, 7, 0.7, 18);
-    final gap      = clampW(context, 6, 0.6, 16);
+    final iconSz   = tvIcon(context, 26);
+    final titleSz  = clampW(context, 11, 1.0, 28);
+    final valSz    = clampW(context, 20, 1.7, 58);
+    final statusSz = clampW(context, 9, 0.85, 22);
+    final gap      = clampW(context, 8, 0.8, 20);
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -29,13 +29,13 @@ class SensorCard extends StatelessWidget {
                   style: kPretendard(
                     fontSize: titleSz,
                     fontWeight: FontWeight.w400,
-                    color: kMuted, // A lighter grey exactly like reference
+                    color: kMuted,
                     height: 1.0,
                   )),
               SizedBox(height: clampH(context, 4, 0.5, 10)),
               Text(sensor.statusText,
                   style: kPretendard(
-                    fontSize: clampW(context, 7.5, 0.8, 19),
+                    fontSize: statusSz,
                     fontWeight: FontWeight.w400,
                     color: color,
                     height: 1.0,
@@ -45,7 +45,7 @@ class SensorCard extends StatelessWidget {
                   style: kPretendard(
                     fontSize: valSz,
                     fontWeight: FontWeight.w700,
-                    color: color, // The values are colored in the screenshot
+                    color: color,
                     height: 1.0,
                   )),
             ],
@@ -57,8 +57,6 @@ class SensorCard extends StatelessWidget {
 }
 
 // ── Sensor icon using native Flutter Icons ────────────────────
-// No flutter_svg needed — native icons work on all renderers
-// including HTML renderer for low-end Android TVs without GPU.
 class _SensorIcon extends StatelessWidget {
   final String icon;
   final Color color;

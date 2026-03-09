@@ -1,8 +1,9 @@
-import { useState, useEffect, memo } from 'react';
+import { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { Calendar, Monitor, Presentation, Users, ChevronLeft, ChevronRight, Plus, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
+import { apiGet, apiPost } from '../services/api';
 
 /* ── Types ─────────────────────────────────────────────────────── */
 interface Room {
@@ -15,9 +16,20 @@ interface Room {
   is_active: boolean;
 }
 
+interface DayBooking {
+  id: string;
+  room_id: string;
+  user_name: string;
+  start_slot: number;
+  end_slot: number;
+  title: string;
+}
+
+type SlotInfo = { title: string; userName: string };
+
 /* ── Constants ──────────────────────────────────────────────────── */
-const TOTAL_SLOTS        = 18;   // 9:00 AM – 5:30 PM at 30 min each
-const VISIBLE_SLOTS      = 18;   // show full day
+const TOTAL_SLOTS        = 18;   // 9:00 AM – 6:00 PM at 30 min each
+const VISIBLE_SLOTS      = 18;
 const MAX_SLOTS_PER_ROOM = 8;
 const MAX_OFFSET         = 0;
 const ALL_SLOTS          = Array.from({ length: TOTAL_SLOTS }, (_, i) => i);
@@ -26,9 +38,6 @@ const HOUR_LABELS        = Array.from({ length: 9 }, (_, i) => {
   return `${dh}${h >= 12 ? 'pm' : 'am'}`;
 });
 const ROOM_COLORS = ['#f59e3d','#60a5fa','#34d399','#f87171','#a78bfa','#fb923c','#22d3ee','#e879f9'];
-
-// Sample booked slots: { roomId -> [slotIdx, ...] }
-const SAMPLE_BOOKINGS: Record<string, number[]> = {};
 
 const formatSlot = (idx: number): string => {
   const mins = 9 * 60 + idx * 30, h = Math.floor(mins / 60), m = mins % 60;
@@ -119,16 +128,18 @@ function AddRoomModal({ onClose, onAdd }: { onClose: () => void; onAdd: (r: Room
 
 /* ── Room Row ───────────────────────────────────────────────────── */
 const RoomRow = memo(function RoomRow({
-  room, index, selectedSlots, onSlotClick, timeOffset, canScrollLeft, canScrollRight, onScrollLeft, onScrollRight,
+  room, index, selectedSlots, onSlotClick, timeOffset,
+  canScrollLeft, canScrollRight, onScrollLeft, onScrollRight,
+  roomBookings,
 }: {
   room: Room; index: number;
   selectedSlots: { roomId: string; timeIndex: number }[];
   onSlotClick: (roomId: string, timeIndex: number) => void;
   timeOffset: number; canScrollLeft: boolean; canScrollRight: boolean;
   onScrollLeft: () => void; onScrollRight: () => void;
+  roomBookings: Record<number, SlotInfo>;
 }) {
   const visibleSlots = ALL_SLOTS.slice(timeOffset, timeOffset + VISIBLE_SLOTS);
-  const bookedSlots  = SAMPLE_BOOKINGS[room.id] ?? [];
 
   return (
     <motion.div style={{ display: 'flex', gap: '1.25rem', alignItems: 'stretch' }}
@@ -161,7 +172,8 @@ const RoomRow = memo(function RoomRow({
 
       {/* Timeline */}
       <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-        <button onClick={onScrollLeft} disabled={!canScrollLeft} title="Earlier" style={{ position: 'absolute', left: '-15px', top: '50%', transform: 'translateY(-50%)', zIndex: 10, width: '30px', height: '30px', borderRadius: '50%', background: '#fff', border: '1px solid #e5e7eb', padding: 0, boxShadow: canScrollLeft ? '0 2px 6px rgba(0,0,0,0.14)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: canScrollLeft ? 'pointer' : 'default', color: canScrollLeft ? '#444' : '#d1d5db', transition: 'all 0.15s' }}>
+        <button onClick={onScrollLeft} disabled={!canScrollLeft} title="Earlier"
+          style={{ position: 'absolute', left: '-15px', top: '50%', transform: 'translateY(-50%)', zIndex: 10, width: '30px', height: '30px', borderRadius: '50%', background: '#fff', border: '1px solid #e5e7eb', padding: 0, boxShadow: canScrollLeft ? '0 2px 6px rgba(0,0,0,0.14)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: canScrollLeft ? 'pointer' : 'default', color: canScrollLeft ? '#444' : '#d1d5db', transition: 'all 0.15s' }}>
           <ChevronLeft size={14} />
         </button>
 
@@ -182,23 +194,43 @@ const RoomRow = memo(function RoomRow({
           {/* Slots */}
           <div style={{ display: 'flex', minHeight: '58px' }}>
             {visibleSlots.map((absIdx, i) => {
-              const isSelected = selectedSlots.some(s => s.roomId === room.id && s.timeIndex === absIdx);
-              const isBooked   = bookedSlots.includes(absIdx);
-              const isHour     = absIdx % 2 === 0;
-              const isLast     = i === VISIBLE_SLOTS - 1;
-              const bg = isSelected ? '#9bc2e6' : isBooked ? '#e5e7eb' : 'transparent';
+              const isSelected  = selectedSlots.some(s => s.roomId === room.id && s.timeIndex === absIdx);
+              const slotInfo    = roomBookings[absIdx];
+              const isBooked    = !!slotInfo;
+              const isHour      = absIdx % 2 === 0;
+              const isLast      = i === VISIBLE_SLOTS - 1;
+              const bg          = isSelected ? '#9bc2e6' : isBooked ? '#fde8e8' : 'transparent';
+              const tooltipText = isBooked
+                ? `${slotInfo.title} — ${slotInfo.userName}`
+                : formatSlot(absIdx);
               return (
-                <div key={absIdx} title={isBooked ? `Booked: ${formatSlot(absIdx)}` : formatSlot(absIdx)}
+                <div
+                  key={absIdx}
+                  title={tooltipText}
                   onClick={() => !isBooked && onSlotClick(room.id, absIdx)}
-                  style={{ flex: 1, borderRight: !isLast ? (isHour ? '1px solid #d1d5db' : '1px dashed #eaecef') : 'none', backgroundColor: bg, cursor: isBooked ? 'not-allowed' : 'pointer', transition: 'background-color 0.12s', position: 'relative' }}>
-                  {isBooked && <div style={{ position: 'absolute', inset: 0, backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(0,0,0,0.04) 4px, rgba(0,0,0,0.04) 8px)' }} />}
+                  style={{
+                    flex: 1,
+                    borderRight: !isLast ? (isHour ? '1px solid #d1d5db' : '1px dashed #eaecef') : 'none',
+                    backgroundColor: bg,
+                    cursor: isBooked ? 'not-allowed' : 'pointer',
+                    transition: 'background-color 0.12s',
+                    position: 'relative',
+                  }}
+                >
+                  {isBooked && (
+                    <div style={{
+                      position: 'absolute', inset: 0,
+                      backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(220,38,38,0.08) 4px, rgba(220,38,38,0.08) 8px)',
+                    }} />
+                  )}
                 </div>
               );
             })}
           </div>
         </div>
 
-        <button onClick={onScrollRight} disabled={!canScrollRight} title="Later" style={{ position: 'absolute', right: '-15px', top: '50%', transform: 'translateY(-50%)', zIndex: 10, width: '30px', height: '30px', borderRadius: '50%', background: '#fff', border: '1px solid #e5e7eb', padding: 0, boxShadow: canScrollRight ? '0 2px 6px rgba(0,0,0,0.14)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: canScrollRight ? 'pointer' : 'default', color: canScrollRight ? '#444' : '#d1d5db', transition: 'all 0.15s' }}>
+        <button onClick={onScrollRight} disabled={!canScrollRight} title="Later"
+          style={{ position: 'absolute', right: '-15px', top: '50%', transform: 'translateY(-50%)', zIndex: 10, width: '30px', height: '30px', borderRadius: '50%', background: '#fff', border: '1px solid #e5e7eb', padding: 0, boxShadow: canScrollRight ? '0 2px 6px rgba(0,0,0,0.14)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: canScrollRight ? 'pointer' : 'default', color: canScrollRight ? '#444' : '#d1d5db', transition: 'all 0.15s' }}>
           <ChevronRight size={14} />
         </button>
       </div>
@@ -210,16 +242,21 @@ const RoomRow = memo(function RoomRow({
 const BookMeetingRoom = () => {
   const { isAdmin } = useAuth();
   const today = new Date().toISOString().split('T')[0];
-  const [selectedDate, setSelectedDate] = useState(today);
-  const [rooms, setRooms]               = useState<Room[]>([]);
-  const [loading, setLoading]           = useState(true);
-  const [showAddRoom, setShowAddRoom]   = useState(false);
-  const [selectedSlots, setSelectedSlots] = useState<{ roomId: string; timeIndex: number }[]>([]);
-  const [timeOffset, setTimeOffset]       = useState(0);
+  const [selectedDate, setSelectedDate]       = useState(today);
+  const [rooms, setRooms]                     = useState<Room[]>([]);
+  const [loading, setLoading]                 = useState(true);
+  const [dayBookings, setDayBookings]         = useState<DayBooking[]>([]);
+  const [showAddRoom, setShowAddRoom]         = useState(false);
+  const [selectedSlots, setSelectedSlots]     = useState<{ roomId: string; timeIndex: number }[]>([]);
+  const [timeOffset, setTimeOffset]           = useState(0);
+  const [subject, setSubject]                 = useState('');
+  const [booking, setBooking]                 = useState(false);
+  const [showSubjectModal, setShowSubjectModal] = useState(false);
 
   const canScrollLeft  = timeOffset > 0;
   const canScrollRight = timeOffset < MAX_OFFSET;
 
+  // Fetch rooms once
   useEffect(() => {
     fetch('/api/v1/rooms')
       .then(r => r.json())
@@ -227,12 +264,32 @@ const BookMeetingRoom = () => {
       .catch(() => setLoading(false));
   }, []);
 
-  // Inject sample bookings for first room (for demo)
-  useEffect(() => {
-    if (rooms.length > 0 && Object.keys(SAMPLE_BOOKINGS).length === 0) {
-      SAMPLE_BOOKINGS[rooms[0].id] = [2, 3, 4]; // 10:00–11:30 AM sample booked
+  // Fetch real bookings for the selected date
+  const fetchDayBookings = useCallback(async () => {
+    try {
+      const data = await apiGet<DayBooking[]>(`/api/v1/bookings?date=${selectedDate}`);
+      setDayBookings(Array.isArray(data) ? data : []);
+    } catch {
+      setDayBookings([]);
     }
-  }, [rooms]);
+  }, [selectedDate]);
+
+  useEffect(() => { fetchDayBookings(); }, [fetchDayBookings]);
+
+  // Build roomId → slotIndex → SlotInfo map from fetched bookings
+  const bookedMap = useMemo<Record<string, Record<number, SlotInfo>>>(() => {
+    const map: Record<string, Record<number, SlotInfo>> = {};
+    for (const b of dayBookings) {
+      if (!map[b.room_id]) map[b.room_id] = {};
+      for (let s = b.start_slot; s < b.end_slot; s++) {
+        map[b.room_id][s] = {
+          title:    b.title || 'Meeting',
+          userName: b.user_name || '',
+        };
+      }
+    }
+    return map;
+  }, [dayBookings]);
 
   const handleSlotClick = (roomId: string, timeIndex: number) => {
     const isSelected = selectedSlots.some(s => s.roomId === roomId && s.timeIndex === timeIndex);
@@ -249,10 +306,38 @@ const BookMeetingRoom = () => {
   };
 
   const totalSelected = selectedSlots.length;
-  const handleBook = () => {
+
+  const confirmBook = async () => {
     if (!totalSelected) { toast.error('Select at least one slot'); return; }
-    toast.success('Booking confirmed! (API integration pending)');
-    setSelectedSlots([]);
+    const roomId = selectedSlots[0].roomId;
+    const slots  = selectedSlots.filter(s => s.roomId === roomId).map(s => s.timeIndex).sort((a, b) => a - b);
+    const start  = slots[0];
+    const end    = slots[slots.length - 1] + 1;
+    setBooking(true);
+    try {
+      await apiPost('/api/v1/bookings', {
+        room_id: roomId,
+        date: selectedDate,
+        start_slot: start,
+        end_slot: end,
+        title: subject.trim() || 'Meeting',
+      });
+      const roomName = rooms.find(r => r.id === roomId)?.name ?? 'Room';
+      toast.success(`${roomName} booked successfully!`);
+      setSelectedSlots([]);
+      setSubject('');
+      setShowSubjectModal(false);
+      // Refresh blocked slots to show the new booking immediately
+      fetchDayBookings();
+    } catch (e: any) {
+      if (e.message?.includes('overlap') || e.message?.includes('conflict') || e.message?.includes('23P01') || e.message?.includes('already booked')) {
+        toast.error('This time slot is already taken. Please choose another.');
+      } else {
+        toast.error('Failed to book. Please try again.');
+      }
+    } finally {
+      setBooking(false);
+    }
   };
 
   return (
@@ -261,7 +346,7 @@ const BookMeetingRoom = () => {
         <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '0.5rem', color: '#1A1A1A' }}>Book a Meeting Room</h1>
         <p style={{ color: '#666', fontSize: '0.9rem' }}>Book a conference room in advance for 30 minutes or more.</p>
 
-        {/* Date picker — min=today prevents past dates */}
+        {/* Date picker */}
         <div style={{ position: 'relative', marginTop: '1.5rem', border: '1px solid #ddd', padding: '0.75rem 1rem', borderRadius: '4px', maxWidth: '350px', backgroundColor: '#fff' }}>
           <div style={{ position: 'absolute', top: '-10px', left: '16px', backgroundColor: '#fff', padding: '0 0.5rem', fontSize: '0.75rem', color: '#aaa' }}>Date</div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -280,14 +365,14 @@ const BookMeetingRoom = () => {
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2, delay: 0.08 }}>
         {/* Header row */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <h2 style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#333' }}>Meeting Rooms Currently Available</h2>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#333' }}>Meeting Rooms</h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <div style={{ fontSize: '0.75rem', color: '#888', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                 <span style={{ width: 12, height: 12, backgroundColor: '#9bc2e6', borderRadius: 2, display: 'inline-block' }} />Selected
               </span>
               <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                <span style={{ width: 12, height: 12, backgroundColor: '#e5e7eb', borderRadius: 2, border: '1px solid #d1d5db', display: 'inline-block' }} />Booked
+                <span style={{ width: 12, height: 12, backgroundColor: '#fde8e8', border: '1px solid #fca5a5', borderRadius: 2, display: 'inline-block' }} />Booked
               </span>
               <span>Each slot = 30 min · 9:00 AM – 6:00 PM</span>
             </div>
@@ -321,11 +406,19 @@ const BookMeetingRoom = () => {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', paddingLeft: '16px', paddingRight: '16px' }}>
             {rooms.map((room, index) => (
-              <RoomRow key={room.id} room={room} index={index} selectedSlots={selectedSlots}
-                onSlotClick={handleSlotClick} timeOffset={timeOffset}
-                canScrollLeft={canScrollLeft} canScrollRight={canScrollRight}
+              <RoomRow
+                key={room.id}
+                room={room}
+                index={index}
+                selectedSlots={selectedSlots}
+                onSlotClick={handleSlotClick}
+                timeOffset={timeOffset}
+                canScrollLeft={canScrollLeft}
+                canScrollRight={canScrollRight}
                 onScrollLeft={() => setTimeOffset(o => Math.max(0, o - 1))}
-                onScrollRight={() => setTimeOffset(o => Math.min(MAX_OFFSET, o + 1))} />
+                onScrollRight={() => setTimeOffset(o => Math.min(MAX_OFFSET, o + 1))}
+                roomBookings={bookedMap[room.id] ?? {}}
+              />
             ))}
           </div>
         )}
@@ -342,9 +435,49 @@ const BookMeetingRoom = () => {
           <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 24 }}
             style={{ position: 'fixed', bottom: '2rem', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#1A1A1A', color: '#fff', padding: '0.875rem 1.75rem', borderRadius: '50px', display: 'flex', alignItems: 'center', gap: '1.25rem', boxShadow: '0 8px 32px rgba(0,0,0,0.22)', zIndex: 200, whiteSpace: 'nowrap' }}>
             <span style={{ fontSize: '0.875rem' }}>{totalSelected} slot{totalSelected !== 1 ? 's' : ''} &nbsp;·&nbsp; {totalSelected * 30} min</span>
-            <button onClick={handleBook} style={{ backgroundColor: '#fff', color: '#1A1A1A', border: 'none', padding: '0.45rem 1.1rem', borderRadius: '50px', fontWeight: 600, cursor: 'pointer', fontSize: '0.875rem' }}>Book Now</button>
+            <button onClick={() => setShowSubjectModal(true)} style={{ backgroundColor: '#fff', color: '#1A1A1A', border: 'none', padding: '0.45rem 1.1rem', borderRadius: '50px', fontWeight: 600, cursor: 'pointer', fontSize: '0.875rem' }}>Book Now</button>
             <button onClick={() => setSelectedSlots([])} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '1rem', lineHeight: 1 }}>✕</button>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Subject / Confirm booking modal */}
+      <AnimatePresence>
+        {showSubjectModal && (
+          <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', zIndex: 400, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '2rem', width: '380px', maxWidth: '95vw', boxShadow: '0 16px 48px rgba(0,0,0,0.18)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                <h3 style={{ fontWeight: 700, fontSize: '1.05rem', margin: 0 }}>Confirm Booking</h3>
+                <button onClick={() => setShowSubjectModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} color="#888" /></button>
+              </div>
+              <div style={{ fontSize: '0.82rem', color: '#666', marginBottom: '1.25rem', lineHeight: 1.5 }}>
+                <strong>{selectedSlots.length} slot{selectedSlots.length !== 1 ? 's' : ''}</strong> &nbsp;·&nbsp; {selectedSlots.length * 30} min &nbsp;·&nbsp; {selectedDate}
+              </div>
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label style={{ display: 'block', fontSize: '0.78rem', color: '#555', marginBottom: '0.35rem', fontWeight: 500 }}>Meeting Subject</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Weekly Sync, Design Review"
+                  maxLength={200}
+                  value={subject}
+                  onChange={e => setSubject(e.target.value)}
+                  autoFocus
+                  style={{ width: '100%', border: '1px solid #ddd', borderRadius: '7px', padding: '0.6rem 0.85rem', fontSize: '0.9rem', outline: 'none', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button type="button" onClick={() => setShowSubjectModal(false)}
+                  style={{ flex: 1, padding: '0.65rem', border: '1px solid #ddd', borderRadius: '8px', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>
+                  Cancel
+                </button>
+                <button type="button" onClick={confirmBook} disabled={booking}
+                  style={{ flex: 1, padding: '0.65rem', border: 'none', borderRadius: '8px', background: booking ? '#888' : '#1A1A1A', color: '#fff', cursor: booking ? 'default' : 'pointer', fontSize: '0.875rem', fontWeight: 600 }}>
+                  {booking ? 'Booking…' : 'Confirm'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

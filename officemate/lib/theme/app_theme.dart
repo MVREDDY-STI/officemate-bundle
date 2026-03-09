@@ -76,3 +76,42 @@ double tvIcon(BuildContext ctx, double base) =>
 ///   • 1280px wide → 22% = 282px (min 240)
 double sidebarWidth(BuildContext ctx) =>
     clampW(ctx, 240, 20, 760);
+
+// ─────────────────────────────────────────────────────────────
+// DYNAMIC THEME COLOR HELPERS
+//
+// Given a user-selected primary color, derive the 3 sidebar
+// palette colors: main bg, darker bottom section, lighter footer.
+// ─────────────────────────────────────────────────────────────
+
+/// Darken a color by reducing HSL lightness by [amount] (0.0–1.0).
+Color darkenColor(Color c, double amount) {
+  final hsl = HSLColor.fromColor(c);
+  return hsl
+      .withLightness((hsl.lightness - amount).clamp(0.0, 1.0))
+      .toColor();
+}
+
+/// Lighten a color by increasing HSL lightness by [amount] (0.0–1.0).
+Color lightenColor(Color c, double amount) {
+  final hsl = HSLColor.fromColor(c);
+  return hsl
+      .withLightness((hsl.lightness + amount).clamp(0.0, 1.0))
+      .toColor();
+}
+
+/// Parse a hex string like '#290D68' or '290D68' to a Flutter Color.
+Color hexToColor(String hex) {
+  final h = hex.replaceAll('#', '').trim();
+  if (h.length != 6) return kSidebarBg; // fallback on invalid input
+  return Color(int.parse('FF$h', radix: 16));
+}
+
+/// Main sidebar background — same as the primary theme color.
+Color sidebarBgFrom(Color primary) => primary;
+
+/// Bottom section background — slightly darker than primary.
+Color sidebarBottomFrom(Color primary) => darkenColor(primary, 0.08);
+
+/// Card footer background — slightly lighter than primary.
+Color footerBgFrom(Color primary) => lightenColor(primary, 0.06);

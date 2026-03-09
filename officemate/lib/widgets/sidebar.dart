@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:intl/intl.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../theme/app_theme.dart';
 import '../models/data_models.dart';
 import '../widgets/meeting_card.dart';
@@ -9,47 +11,91 @@ import '../widgets/mini_calendar.dart';
 import '../widgets/sidebar_template.dart';
 
 class SidebarWidget extends StatefulWidget {
-  const SidebarWidget({super.key});
+  final String? logoUrl;
+  final List<MeetingRoom> bookings;
+  final List<DisplaySlide> slides;
+  final bool hasData;
+  final Color themeColor;
+
+  const SidebarWidget({
+    super.key,
+    this.logoUrl,
+    required this.bookings,
+    required this.slides,
+    required this.hasData,
+    this.themeColor = kSidebarBg,
+  });
 
   @override
   State<SidebarWidget> createState() => _SidebarWidgetState();
 }
 
 class _SidebarWidgetState extends State<SidebarWidget> {
-  int _cycleIndex = 0;
-
-  final List<(String, bool)> _cycleStates = const [
-    ('template1', true),
-    ('template2', true),
-    ('template3', true),
-    ('template4', true),
-    ('template1', false),
-    ('template2', false),
-    ('template3', false),
-    ('template4', false),
-  ];
+  int  _slideIndex   = 0;
+  Timer? _slideTimer;
 
   @override
   void initState() {
     super.initState();
-    Stream.periodic(const Duration(seconds: 3)).listen((_) {
+    _startSlideTimer();
+  }
+
+  void _startSlideTimer() {
+    _slideTimer?.cancel();
+    if (widget.slides.isEmpty) return;
+    final secs = widget.slides[_slideIndex % widget.slides.length].durationSeconds;
+    _slideTimer = Timer(Duration(seconds: secs), () {
       if (!mounted) return;
-      setState(() => _cycleIndex = (_cycleIndex + 1) % _cycleStates.length);
+      setState(() => _slideIndex = (_slideIndex + 1) % widget.slides.length);
+      _startSlideTimer();
     });
+  }
+
+  @override
+  void didUpdateWidget(SidebarWidget old) {
+    super.didUpdateWidget(old);
+    if (old.slides != widget.slides) {
+      _slideIndex = 0;
+      _startSlideTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _slideTimer?.cancel();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final sideW = sidebarWidth(context);
-    final (templateType, isMeeting) = _cycleStates[_cycleIndex];
+
+    // Derive all 3 sidebar colors from the single theme color
+    final bg       = sidebarBgFrom(widget.themeColor);
+    final bottom   = sidebarBottomFrom(widget.themeColor);
+    final footerBg = footerBgFrom(widget.themeColor);
+
+    final DisplaySlide? currentSlide = widget.slides.isNotEmpty
+        ? widget.slides[_slideIndex % widget.slides.length]
+        : null;
 
     return SizedBox(
       width: sideW,
       child: Column(
         children: [
-          _LogoSection(),
-          Expanded(child: _MeetingsSection(isMeeting: isMeeting)),
-          Expanded(child: _BottomSection(templateType: templateType)),
+          _LogoSection(logoUrl: widget.logoUrl, bgColor: bg),
+          Expanded(
+            child: _MeetingsSection(
+              isMeeting: widget.bookings.isNotEmpty,
+              bookings:  widget.bookings,
+              bgColor:   bg,
+            ),
+          ),
+          Expanded(child: _BottomSection(
+            slide:     currentSlide,
+            bgColor:   bottom,
+            footerBg:  footerBg,
+          )),
         ],
       ),
     );
@@ -60,32 +106,29 @@ class _SidebarWidgetState extends State<SidebarWidget> {
 // LOGO SECTION
 // ─────────────────────────────────────────────────────────────
 class _LogoSection extends StatelessWidget {
+  final String? logoUrl;
+  final Color bgColor;
+  const _LogoSection({this.logoUrl, this.bgColor = kSidebarBg});
+
   @override
   Widget build(BuildContext context) {
-    final h    = clampH(context, 48, 9, 160);
-    final pad  = clampW(context, 4, 1.5, 24);
-    // Logo height: compact — 30–40% of the logo bar height
-    final logoH = (h * 0.36).clamp(16.0, 52.0);
+    final h     = clampH(context, 48, 9, 160);
+    final pad   = clampW(context, 4, 1.5, 24);
+    final logoH = (h * 0.26).clamp(10.0, 36.0);
 
     return Container(
       height: h,
       width: double.infinity,
-      color: kSidebarBg,
+      color: bgColor,
       child: Stack(
         children: [
           Padding(
             padding: EdgeInsets.only(left: pad),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: SvgPicture.asset(
-                'assets/images/logo.svg',
-                height: logoH,
-                colorFilter: const ColorFilter.mode(
-                    Colors.white, BlendMode.srcIn),
-              ),
+              child: _buildLogo(logoH),
             ),
           ),
-          // Subtle separator line at bottom
           Positioned(
             bottom: 0, left: pad, right: pad,
             child: Container(
@@ -107,6 +150,36 @@ class _LogoSection extends StatelessWidget {
       ),
     );
   }
+
+  Widget _buildLogo(double logoH) {
+    if (logoUrl != null && logoUrl!.isNotEmpty) {
+      if (logoUrl!.endsWith('.svg')) {
+        return SvgPicture.network(
+          logoUrl!,
+          height: logoH,
+          colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+          placeholderBuilder: (_) => _fallbackLogo(logoH),
+        );
+      }
+      return CachedNetworkImage(
+        imageUrl: logoUrl!,
+        height: logoH,
+        fit: BoxFit.contain,
+        color: Colors.white,
+        colorBlendMode: BlendMode.srcIn,
+        errorWidget: (_, __, ___) => _fallbackLogo(logoH),
+      );
+    }
+    return _fallbackLogo(logoH);
+  }
+
+  Widget _fallbackLogo(double logoH) {
+    return SvgPicture.asset(
+      'assets/images/logo.svg',
+      height: logoH,
+      colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -114,7 +187,13 @@ class _LogoSection extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────
 class _MeetingsSection extends StatelessWidget {
   final bool isMeeting;
-  const _MeetingsSection({required this.isMeeting});
+  final List<MeetingRoom> bookings;
+  final Color bgColor;
+  const _MeetingsSection({
+    required this.isMeeting,
+    required this.bookings,
+    this.bgColor = kSidebarBg,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -125,36 +204,48 @@ class _MeetingsSection extends StatelessWidget {
     final dateStr  = DateFormat('EEE, MMM d').format(DateTime.now()).toUpperCase();
 
     return Container(
-      color: kSidebarBg,
+      color: bgColor,
       child: Column(
         children: [
-          // Date bar — uses native Icon (no SVG, no GPU needed)
           SizedBox(
             height: dateBarH,
             child: Padding(
               padding: EdgeInsets.symmetric(horizontal: pad),
-              child: Row(
-                children: [
-                  Icon(Icons.calendar_today_outlined,
-                      color: Colors.white70, size: iconSz),
-                  SizedBox(width: clampW(context, 4, 0.5, 14)),
-                  Text(dateStr,
-                      style: kPretendard(
-                        fontSize: fontSize,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.2,
-                        color: Colors.white.withValues(alpha: 0.85),
-                      )),
-                ],
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: clampW(context, 6, 1.0, 20),
+                    vertical:   clampH(context, 3, 0.5, 10),
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.calendar_today_outlined,
+                          color: Colors.white, size: iconSz),
+                      SizedBox(width: clampW(context, 4, 0.5, 14)),
+                      Text(dateStr,
+                          style: kPretendard(
+                            fontSize: fontSize,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.2,
+                            color: Colors.white,
+                          )),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
-          // Meeting list ↔ Calendar — animated crossfade
           Expanded(
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 500),
               child: isMeeting
-                  ? _MeetingsList(key: const ValueKey('meetings'), pad: pad)
+                  ? _MeetingsList(key: const ValueKey('meetings'), pad: pad, bookings: bookings)
                   : MiniCalendar(key: const ValueKey('calendar'), pad: pad),
             ),
           ),
@@ -166,14 +257,15 @@ class _MeetingsSection extends StatelessWidget {
 
 class _MeetingsList extends StatelessWidget {
   final double pad;
-  const _MeetingsList({super.key, required this.pad});
+  final List<MeetingRoom> bookings;
+  const _MeetingsList({super.key, required this.pad, required this.bookings});
 
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
       padding: EdgeInsets.symmetric(horizontal: pad, vertical: 4),
-      itemCount: kMeetingRooms.length,
-      itemBuilder: (ctx, i) => MeetingCard(meeting: kMeetingRooms[i])
+      itemCount: bookings.length,
+      itemBuilder: (ctx, i) => MeetingCard(meeting: bookings[i])
           .animate()
           .fadeIn(duration: 400.ms, delay: Duration(milliseconds: i * 80))
           .slideY(begin: 0.1, end: 0),
@@ -183,67 +275,32 @@ class _MeetingsList extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────
 // BOTTOM SECTION
+// Each slide template manages its own footer internally.
 // ─────────────────────────────────────────────────────────────
 class _BottomSection extends StatelessWidget {
-  final String templateType;
-  const _BottomSection({required this.templateType});
+  final DisplaySlide? slide;
+  final Color bgColor;
+  final Color footerBg;
+  const _BottomSection({
+    this.slide,
+    this.bgColor = kSidebarBottom,
+    this.footerBg = kFooterBg,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: kSidebarBottom,
-      child: Column(
-        children: [
-          Expanded(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 600),
-              transitionBuilder: (child, anim) =>
-                  FadeTransition(opacity: anim, child: child),
-              child: SidebarTemplate(
-                  key: ValueKey(templateType), templateType: templateType),
-            ),
-          ),
-          _EmployeeBar(),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmployeeBar extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final pad  = clampW(context, 4, 1.5, 24);
-    final vPad = clampH(context, 6, 1.2, 28);
-
-    return Container(
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        color: kFooterBg,
-        border: Border(top: BorderSide(color: Color(0x1AFFFFFF))),
-      ),
-      padding: EdgeInsets.symmetric(horizontal: pad, vertical: vPad),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('Hugo Hwangjoo Cho',
-              style: kPretendard(
-                fontSize: clampW(context, 7, 0.9, 24),
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-                letterSpacing: 0.3,
-              ),
-              overflow: TextOverflow.ellipsis),
-          SizedBox(height: clampH(context, 1, 0.3, 6)),
-          Text('Head of Technical Engineering, CTO',
-              style: kPretendard(
-                fontSize: clampW(context, 6, 0.75, 20),
-                fontWeight: FontWeight.w400,
-                color: kLavender,
-              ),
-              overflow: TextOverflow.ellipsis),
-        ],
+      color: bgColor,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 600),
+        transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
+        child: slide != null
+            ? SidebarTemplate(
+                key: ValueKey('${slide!.id}_${slide!.slideType}'),
+                slide: slide!,
+                footerColor: footerBg,
+              )
+            : Container(key: const ValueKey('empty'), color: bgColor),
       ),
     );
   }

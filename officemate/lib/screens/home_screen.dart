@@ -40,6 +40,7 @@ List<MeetingRoom> _toDisplayBookings(List<Map<String, dynamic>> raw) {
 class _HomeScreenState extends State<HomeScreen> {
   String _timeStr       = '';
   Timer? _timer;
+  Timer? _refreshTimer; // periodic full-data refresh fallback every 5 min
 
   // Live data
   String  _displayTitle = 'Officemate';
@@ -68,6 +69,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
     _loadData();
     _connectWebSocket();
+
+    // Safety-net: re-fetch data AND ensure WS is connected every 5 minutes.
+    // This recovers from missed events AND from backend restarts automatically.
+    _refreshTimer = Timer.periodic(const Duration(minutes: 5), (_) {
+      if (mounted) {
+        WsService.instance.ensureConnected();
+        _loadData();
+      }
+    });
   }
 
   void _refreshTime() {
@@ -169,6 +179,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _refreshTimer?.cancel();
     WsService.instance.removeHandler(_onWsEvent);
     super.dispose();
   }

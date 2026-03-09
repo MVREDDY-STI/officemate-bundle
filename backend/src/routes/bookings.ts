@@ -1,6 +1,6 @@
 import db from '../db/client';
 import { authenticate } from '../middleware/auth';
-import { broadcast, broadcastToDevices } from '../ws/hub';
+import { broadcast, broadcastToAllDevices } from '../ws/hub';
 import {
   vUuid, vDate, vInt, vStringOptional,
   parsePagination, ValidationError, validationErrorResponse,
@@ -14,17 +14,10 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-/** Notify TV displays that are linked to the affected room */
+/** Notify ALL TV displays when any booking changes so every display can refresh */
 async function notifyDisplaysForRoom(roomId: string): Promise<void> {
   try {
-    const result = await db.query(
-      'SELECT id FROM tv_displays WHERE room_id = $1',
-      [roomId],
-    );
-    if (result.rows.length > 0) {
-      const displayIds = result.rows.map((r: { id: string }) => r.id);
-      broadcastToDevices(displayIds, 'display:booking_updated', { room_id: roomId });
-    }
+    broadcastToAllDevices('display:booking_updated', { room_id: roomId });
   } catch { /* non-critical — don't fail the booking operation */ }
 }
 

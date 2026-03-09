@@ -86,9 +86,10 @@ class _SidebarWidgetState extends State<SidebarWidget> {
           _LogoSection(logoUrl: widget.logoUrl, bgColor: bg),
           Expanded(
             child: _MeetingsSection(
-              isMeeting: widget.bookings.isNotEmpty,
-              bookings:  widget.bookings,
-              bgColor:   bg,
+              isMeeting:  widget.bookings.isNotEmpty,
+              bookings:   widget.bookings,
+              bgColor:    bg,
+              themeColor: widget.themeColor,
             ),
           ),
           Expanded(child: _BottomSection(
@@ -189,10 +190,12 @@ class _MeetingsSection extends StatelessWidget {
   final bool isMeeting;
   final List<MeetingRoom> bookings;
   final Color bgColor;
+  final Color themeColor;
   const _MeetingsSection({
     required this.isMeeting,
     required this.bookings,
     this.bgColor = kSidebarBg,
+    this.themeColor = kSidebarBg,
   });
 
   @override
@@ -245,7 +248,7 @@ class _MeetingsSection extends StatelessWidget {
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 500),
               child: isMeeting
-                  ? _MeetingsList(key: const ValueKey('meetings'), pad: pad, bookings: bookings)
+                  ? _MeetingsList(key: const ValueKey('meetings'), pad: pad, bookings: bookings, themeColor: themeColor)
                   : MiniCalendar(key: const ValueKey('calendar'), pad: pad),
             ),
           ),
@@ -258,14 +261,15 @@ class _MeetingsSection extends StatelessWidget {
 class _MeetingsList extends StatelessWidget {
   final double pad;
   final List<MeetingRoom> bookings;
-  const _MeetingsList({super.key, required this.pad, required this.bookings});
+  final Color themeColor;
+  const _MeetingsList({super.key, required this.pad, required this.bookings, required this.themeColor});
 
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
       padding: EdgeInsets.symmetric(horizontal: pad, vertical: 4),
       itemCount: bookings.length,
-      itemBuilder: (ctx, i) => MeetingCard(meeting: bookings[i])
+      itemBuilder: (ctx, i) => MeetingCard(meeting: bookings[i], themeColor: themeColor)
           .animate()
           .fadeIn(duration: 400.ms, delay: Duration(milliseconds: i * 80))
           .slideY(begin: 0.1, end: 0),

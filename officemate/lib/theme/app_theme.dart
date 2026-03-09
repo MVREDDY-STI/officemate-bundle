@@ -110,8 +110,8 @@ Color hexToColor(String hex) {
 /// Main sidebar background — same as the primary theme color.
 Color sidebarBgFrom(Color primary) => primary;
 
-/// Bottom section background — slightly darker than primary.
-Color sidebarBottomFrom(Color primary) => darkenColor(primary, 0.08);
+/// Bottom section background — same as primary so the sidebar looks uniform.
+Color sidebarBottomFrom(Color primary) => primary;
 
-/// Card footer background — slightly lighter than primary.
-Color footerBgFrom(Color primary) => lightenColor(primary, 0.06);
+/// Card footer background — very slightly lighter than primary.
+Color footerBgFrom(Color primary) => lightenColor(primary, 0.04);

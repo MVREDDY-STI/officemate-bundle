@@ -29,6 +29,13 @@ const PORT = Number(process.env.PORT ?? 3000);
 // ── Startup tasks ────────────────────────────────────────────
 await ensureStorageReady();
 
+// Reset all display online flags on startup — they will be set TRUE again
+// when each device reconnects its WebSocket. This prevents stale "online"
+// ghosts after a backend restart.
+try {
+  await db.query('UPDATE tv_displays SET is_online = FALSE');
+} catch { /* non-critical */ }
+
 function getIp(req: Request): string {
   return (
     req.headers.get('X-Real-IP') ??
@@ -138,7 +145,15 @@ const server = Bun.serve({
     message(ws, message) {
       try {
         const { action } = JSON.parse(message as string) as { action: string };
-        if (action === 'ping') ws.send(JSON.stringify({ event: 'pong' }));
+        if (action === 'ping') {
+          ws.send(JSON.stringify({ event: 'pong' }));
+          // Keep last_seen_at fresh so the hybrid online check stays accurate
+          if ((ws as any)._clientType === 'device') {
+            const displayId = (ws.data as any).displayId;
+            db.query('UPDATE tv_displays SET last_seen_at = NOW() WHERE id = $1', [displayId])
+              .catch(() => { /* non-critical */ });
+          }
+        }
       } catch { /* ignore malformed messages */ }
     },
     async close(ws) {

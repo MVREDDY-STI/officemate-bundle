@@ -147,10 +147,15 @@ export async function handleDisplays(req: Request, path: string): Promise<Respon
          ORDER BY d.created_at DESC`,
       );
 
-      // Enrich with live WebSocket status
+      // Hybrid online status:
+      //   1. WS hub   — real-time (device has an active WS connection right now)
+      //   2. Fallback — last_seen_at within 90 seconds. The device pings every 30s
+      //      so this covers the brief window while WS is reconnecting after a restart.
+      const ninetySecAgo = new Date(Date.now() - 90 * 1000);
       const rows = result.rows.map(row => ({
         ...row,
-        is_online: onlineIds.has(row.id),
+        is_online: onlineIds.has(row.id) ||
+          (row.last_seen_at != null && new Date(row.last_seen_at) > ninetySecAgo),
       }));
       return json(rows);
     } catch (e: any) {
@@ -224,23 +229,37 @@ export async function handleDisplays(req: Request, path: string): Promise<Respon
         'SELECT room_id FROM tv_displays WHERE id = $1',
         [displayId],
       );
-      const roomId = displayRow.rows[0]?.room_id;
-      if (!roomId) return json([]);
-
-      const url      = new URL(req.url);
+      const roomId    = displayRow.rows[0]?.room_id;
+      const url       = new URL(req.url);
       const dateParam = url.searchParams.get('date') ?? new Date().toISOString().split('T')[0];
 
-      const result = await db.query(
-        `SELECT b.id, b.room_id, r.name AS room_name, b.user_id, u.name AS user_name,
-                b.booking_date, b.start_slot, b.end_slot, b.title, b.status
-         FROM bookings b
-         JOIN rooms r ON r.id = b.room_id
-         JOIN users u ON u.id = b.user_id
-         WHERE b.room_id = $1 AND b.booking_date = $2 AND b.status = 'confirmed'
-         ORDER BY b.start_slot`,
-        [roomId, dateParam],
-      );
-      return json(result.rows);
+      if (roomId) {
+        // Display linked to a specific room — return that room's bookings only
+        const result = await db.query(
+          `SELECT b.id, b.room_id, r.name AS room_name, b.user_id, u.name AS user_name,
+                  b.booking_date, b.start_slot, b.end_slot, b.title, b.status
+           FROM bookings b
+           JOIN rooms r ON r.id = b.room_id
+           JOIN users u ON u.id = b.user_id
+           WHERE b.room_id = $1 AND b.booking_date = $2 AND b.status = 'confirmed'
+           ORDER BY b.start_slot`,
+          [roomId, dateParam],
+        );
+        return json(result.rows);
+      } else {
+        // Not linked to any room — return all confirmed bookings for today across all rooms
+        const result = await db.query(
+          `SELECT b.id, b.room_id, r.name AS room_name, b.user_id, u.name AS user_name,
+                  b.booking_date, b.start_slot, b.end_slot, b.title, b.status
+           FROM bookings b
+           JOIN rooms r ON r.id = b.room_id
+           JOIN users u ON u.id = b.user_id
+           WHERE b.booking_date = $1 AND b.status = 'confirmed'
+           ORDER BY b.room_id, b.start_slot`,
+          [dateParam],
+        );
+        return json(result.rows);
+      }
     } catch (e: any) {
       if (e.message?.includes('Missing') || e.message?.includes('Invalid')) return json({ error: 'Unauthorized' }, 401);
       logError('displays-me-bookings', e);

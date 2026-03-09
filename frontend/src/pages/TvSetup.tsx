@@ -4,6 +4,7 @@ import { Monitor, Plus, Trash2, Edit2, Wifi, WifiOff, Upload, X,
 import toast from 'react-hot-toast';
 import { apiGet, apiPost, apiPatch, apiDelete, apiUpload, BASE } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import ImageEditorModal from '../components/ImageEditorModal';
 
 // ── Types ──────────────────────────────────────────────────────
 type TvDisplay = {
@@ -401,19 +402,22 @@ function SlideFormModal({ slide, displays, onClose, onSaved }: {
   );
   const [saving, setSaving]       = useState(false);
   const [uploading, setUploading] = useState<string | null>(null); // field name being uploaded
+  // Image editor state
+  const [editorFile, setEditorFile]   = useState<File | null>(null);
+  const [editorField, setEditorField] = useState<string>('');
 
   const setC = (key: string, val: string) => setContent(c => ({ ...c, [key]: val }));
 
-  const handleUpload = async (field: string, file: File) => {
-    setUploading(field);
-    try {
-      const fd = new FormData(); fd.append('file', file);
-      const result = await apiUpload<{ url: string }>('/api/v1/uploads', fd);
-      const url = result.url.startsWith('http') ? result.url : `${BASE}${result.url}`;
-      setC(field, url);
-      toast.success('Image uploaded');
-    } catch { toast.error('Upload failed'); }
-    finally { setUploading(null); }
+  // Opens image editor; on save, sets field URL
+  const handleUpload = (field: string, file: File) => {
+    setEditorField(field);
+    setEditorFile(file);
+  };
+
+  const handleEditorSave = (url: string) => {
+    setC(editorField, url);
+    setEditorFile(null);
+    setEditorField('');
   };
 
   const handleSubmit = async () => {
@@ -443,6 +447,14 @@ function SlideFormModal({ slide, displays, onClose, onSaved }: {
     setSelectedDisplayIds(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
 
   return (
+    <>
+    {editorFile && (
+      <ImageEditorModal
+        file={editorFile}
+        onClose={() => { setEditorFile(null); setEditorField(''); }}
+        onSave={handleEditorSave}
+      />
+    )}
     <Modal title={isEdit ? 'Edit Slide' : 'Add Slide'} onClose={onClose} wide>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
@@ -595,6 +607,7 @@ function SlideFormModal({ slide, displays, onClose, onSaved }: {
         </div>
       </div>
     </Modal>
+    </>
   );
 }
 
@@ -613,8 +626,8 @@ function ImageInput({ value, onChange, onUpload, uploading }: {
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
         <button type="button" className="btn btn-outline"
           style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
-          onClick={e => { e.stopPropagation(); fileRef.current?.click(); }} disabled={uploading}>
-          <Upload size={13} /> {uploading ? 'Uploading...' : 'Upload Photo'}
+          onClick={e => { e.stopPropagation(); fileRef.current?.click(); }}>
+          <Upload size={13} /> Upload & Edit
         </button>
         {value && (
           <img src={value} alt="preview" style={{ height: '32px', width: '32px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #E5E7EB' }}
@@ -634,10 +647,11 @@ const PRESET_COLORS = ['#290D68', '#1A3A5C', '#0D5C3A', '#5C1A1A', '#1A5C5C', '#
 function LogoTab() {
   // ── Logo state ────────────────────────────────────────────
   const [currentUrl, setCurrentUrl] = useState<string | null>(null);
-  const [uploading, setUploading]   = useState(false);
   const [saving, setSaving]         = useState(false);
   const [manualUrl, setManualUrl]   = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  // Image editor state for logo
+  const [editorFile, setEditorFile] = useState<File | null>(null);
 
   // ── Theme color state ─────────────────────────────────────
   const [savedColor, setSavedColor]   = useState('#290D68');
@@ -653,16 +667,18 @@ function LogoTab() {
     }).catch(() => {});
   }, []);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    setUploading(true);
-    try {
-      const fd = new FormData(); fd.append('file', file);
-      const result = await apiUpload<{ url: string }>('/api/v1/uploads', fd);
-      const fullUrl = result.url.startsWith('http') ? result.url : `${BASE}${result.url}`;
-      setManualUrl(fullUrl); toast.success('Image uploaded — click Save to apply');
-    } catch { toast.error('Upload failed'); }
-    finally { setUploading(false); }
+  // Open editor on file select
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) setEditorFile(file);
+    e.target.value = '';
+  };
+
+  // Called when editor saves → set URL (user must still click "Save Logo")
+  const handleEditorSave = (url: string) => {
+    setManualUrl(url);
+    setEditorFile(null);
+    toast.success('Image processed — click Save Logo to apply');
   };
 
   const handleSave = async () => {
@@ -690,6 +706,14 @@ function LogoTab() {
   };
 
   return (
+    <>
+    {editorFile && (
+      <ImageEditorModal
+        file={editorFile}
+        onClose={() => setEditorFile(null)}
+        onSave={handleEditorSave}
+      />
+    )}
     <div style={{ maxWidth: '560px', display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
 
       {/* ── Logo Section ──────────────────────────────────────── */}
@@ -712,12 +736,12 @@ function LogoTab() {
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
             <button className="btn btn-outline"
               style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-              onClick={() => fileRef.current?.click()} disabled={uploading}>
-              <Upload size={15} /> {uploading ? 'Uploading...' : 'Upload Image'}
+              onClick={() => fileRef.current?.click()}>
+              <Upload size={15} /> Upload & Edit Image
             </button>
             <span style={{ color: '#9CA3AF', fontSize: '0.8rem' }}>or paste URL above</span>
           </div>
-          <input ref={fileRef} type="file" accept="image/*,image/svg+xml" style={{ display: 'none' }} onChange={handleUpload} />
+          <input ref={fileRef} type="file" accept="image/*,image/svg+xml" style={{ display: 'none' }} onChange={handleFileSelect} />
           <button className="btn btn-primary" style={{ alignSelf: 'flex-start' }}
             onClick={handleSave} disabled={saving || !manualUrl.trim()}>
             {saving ? 'Saving...' : 'Save Logo'}
@@ -789,6 +813,7 @@ function LogoTab() {
       </div>
 
     </div>
+    </>
   );
 }
 

@@ -163,4 +163,4 @@ export const ALLOWED_MIME = new Set([
   'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml',
 ]);
 
-export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB — supports large photos

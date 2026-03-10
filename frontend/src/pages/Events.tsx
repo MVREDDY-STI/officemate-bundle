@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Pencil, Trash2, X, Camera, Calendar, Clock, ChevronRight, ImageOff } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import ImageEditorModal from '../components/ImageEditorModal';
 
 /* ── Types ───────────────────────────────────────────────────── */
 interface Event {
@@ -23,11 +24,6 @@ function authHeaders(): Record<string, string> {
   const t = getToken();
   return t ? { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
 }
-function authHeadersMultipart(): Record<string, string> {
-  const t = getToken();
-  return t ? { Authorization: `Bearer ${t}` } : {};
-}
-
 /** Normalise any date string to plain YYYY-MM-DD so appending T00:00:00 is safe. */
 function toDateStr(d: string): string { return d.slice(0, 10); }
 
@@ -64,17 +60,24 @@ function EventFormModal({ initial, onClose, onSave }: EventFormProps) {
   const [date, setDate]         = useState(initial?.event_date?.slice(0, 10) ?? '');
   const [time, setTime]         = useState(initial?.event_time ?? '');
   const [imageUrl, setImageUrl] = useState(initial?.image_url ?? '');
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(initial?.image_url ?? null);
-  const [uploading, setUploading] = useState(false);
+  const [editorFile, setEditorFile] = useState<File | null>(null);
   const [saving, setSaving]     = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Open editor when image is picked
   const pickPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setPhotoFile(file);
-    setPhotoPreview(URL.createObjectURL(file));
+    e.target.value = '';
+    setEditorFile(file);
+  };
+
+  // Editor uploaded & returned the MinIO URL — use it directly
+  const handleEditorSave = (url: string) => {
+    setImageUrl(url);
+    setPhotoPreview(url);
+    setEditorFile(null);
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -82,20 +85,10 @@ function EventFormModal({ initial, onClose, onSave }: EventFormProps) {
     if (!title.trim()) return;
     setSaving(true);
     try {
-      let finalImageUrl = imageUrl;
-      if (photoFile) {
-        setUploading(true);
-        const fd = new FormData();
-        fd.append('file', photoFile);
-        const up = await fetch('/api/v1/uploads', { method: 'POST', headers: authHeadersMultipart(), body: fd });
-        setUploading(false);
-        if (!up.ok) { alert('Image upload failed'); setSaving(false); return; }
-        finalImageUrl = (await up.json()).url;
-      }
       const payload = {
         title: title.trim(),
         description: desc.trim() || null,
-        image_url: finalImageUrl || null,
+        image_url: imageUrl || null,
         event_date: date || null,
         event_time: time || null,
         is_published: true,
@@ -112,6 +105,14 @@ function EventFormModal({ initial, onClose, onSave }: EventFormProps) {
   const INPUT = { border: '1px solid #e5e7eb', borderRadius: '8px', padding: '0.55rem 0.75rem', fontSize: '0.875rem', outline: 'none', width: '100%', boxSizing: 'border-box' as const, fontFamily: 'inherit' };
 
   return (
+    <>
+    {editorFile && (
+      <ImageEditorModal
+        file={editorFile}
+        onClose={() => setEditorFile(null)}
+        onSave={handleEditorSave}
+      />
+    )}
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
       onClick={onClose}>
       <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -173,15 +174,16 @@ function EventFormModal({ initial, onClose, onSave }: EventFormProps) {
 
             <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
               <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.6rem', border: '1px solid #e5e7eb', borderRadius: '8px', background: '#fff', cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 }}>Cancel</button>
-              <button type="submit" disabled={saving || uploading}
-                style={{ flex: 2, padding: '0.6rem', border: 'none', borderRadius: '8px', background: '#1a1a1a', color: '#fff', cursor: (saving || uploading) ? 'default' : 'pointer', fontSize: '0.875rem', fontWeight: 600, opacity: (saving || uploading) ? 0.7 : 1 }}>
-                {uploading ? 'Uploading image…' : saving ? (isEdit ? 'Saving…' : 'Creating…') : (isEdit ? 'Save Changes' : 'Create Event')}
+              <button type="submit" disabled={saving}
+                style={{ flex: 2, padding: '0.6rem', border: 'none', borderRadius: '8px', background: '#1a1a1a', color: '#fff', cursor: saving ? 'default' : 'pointer', fontSize: '0.875rem', fontWeight: 600, opacity: saving ? 0.7 : 1 }}>
+                {saving ? (isEdit ? 'Saving…' : 'Creating…') : (isEdit ? 'Save Changes' : 'Create Event')}
               </button>
             </div>
           </form>
         </div>
       </motion.div>
     </div>
+    </>
   );
 }
 

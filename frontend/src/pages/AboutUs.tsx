@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, Plus, Trash2, UserPlus, X, User, Mail, Phone, C
 import { motion, AnimatePresence } from 'framer-motion';
 import EditableField from '../components/EditableField';
 import EditableImage from '../components/EditableImage';
+import ImageEditorModal from '../components/ImageEditorModal';
 import { useAuth } from '../context/AuthContext';
 
 /* ── Team/Employee types ─────────────────────────────────────── */
@@ -15,7 +16,6 @@ interface Team { id: string; name: string; description: string; employees: Emplo
 
 function getToken() { try { return JSON.parse(sessionStorage.getItem('solum_auth') ?? '{}').token; } catch { return null; } }
 function authHeaders() { const t = getToken(); return t ? { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' }; }
-function authHeadersMultipart() { const t = getToken(); return t ? { Authorization: `Bearer ${t}` } : {}; }
 
 /* ── Employee Avatar ─────────────────────────────────────────── */
 function EmployeeAvatar({ emp, size = 80 }: { emp: Employee; size?: number }) {
@@ -121,9 +121,9 @@ function AddTeamModal({ onClose, onAdd }: { onClose: () => void; onAdd: (t: Team
 function AddEmployeeModal({ teamId, onClose, onAdd }: { teamId: string; onClose: () => void; onAdd: (e: Employee) => void }) {
   const EMPTY = { name: '', employee_id: '', designation: '', email: '', phone: '', dob: '', emergency_contact: '' };
   const [form, setForm] = useState(EMPTY);
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [editorFile, setEditorFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -132,27 +132,23 @@ function AddEmployeeModal({ teamId, onClose, onAdd }: { teamId: string; onClose:
   const pickPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setPhotoFile(file);
-    setPhotoPreview(URL.createObjectURL(file));
+    e.target.value = '';
+    setEditorFile(file);
+  };
+
+  // Called when ImageEditorModal finishes — url is already uploaded to MinIO
+  const handleEditorSave = (url: string) => {
+    setEditorFile(null);
+    setPhotoUrl(url);
+    setPhotoPreview(url);
   };
 
   const submit = async (ev: React.FormEvent) => {
     ev.preventDefault(); if (!form.name.trim()) return;
     setSaving(true);
     try {
-      // 1. Upload photo if picked
-      let photo_url = '';
-      if (photoFile) {
-        setUploading(true);
-        const fd = new FormData();
-        fd.append('file', photoFile);
-        const up = await fetch('/api/v1/uploads', { method: 'POST', headers: authHeadersMultipart(), body: fd });
-        setUploading(false);
-        if (!up.ok) { alert('Photo upload failed'); setSaving(false); return; }
-        photo_url = (await up.json()).url;
-      }
-      // 2. Create employee
-      const payload = { ...form, ...(photo_url ? { photo_url } : {}) };
+      // Photo already uploaded via editor — just pass the URL
+      const payload = { ...form, ...(photoUrl ? { photo_url: photoUrl } : {}) };
       const r = await fetch(`/api/v1/teams/${teamId}/employees`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(payload) });
       if (!r.ok) { const j = await r.json(); alert(j.error ?? 'Failed'); setSaving(false); return; }
       onAdd(await r.json()); onClose();
@@ -167,6 +163,14 @@ function AddEmployeeModal({ teamId, onClose, onAdd }: { teamId: string; onClose:
   ];
 
   return (
+    <>
+      {editorFile && (
+        <ImageEditorModal
+          file={editorFile}
+          onClose={() => setEditorFile(null)}
+          onSave={handleEditorSave}
+        />
+      )}
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 400, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
         style={{ background: '#fff', borderRadius: '12px', padding: '1.75rem', width: '480px', maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 16px 48px rgba(0,0,0,0.18)' }}>
@@ -178,7 +182,7 @@ function AddEmployeeModal({ teamId, onClose, onAdd }: { teamId: string; onClose:
           {/* Photo picker */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '1.25rem' }}>
             <div
-              onClick={() => fileRef.current?.click()}
+              onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}
               style={{ width: '80px', height: '80px', borderRadius: '50%', overflow: 'hidden', border: '2px dashed #d1d5db', cursor: 'pointer', position: 'relative', background: '#f9fafb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {photoPreview
                 ? <img src={photoPreview} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="preview" />
@@ -189,7 +193,9 @@ function AddEmployeeModal({ teamId, onClose, onAdd }: { teamId: string; onClose:
                 <Camera size={18} color="#fff" />
               </div>
             </div>
-            <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={pickPhoto} />
+            <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
+              onClick={e => e.stopPropagation()}
+              onChange={pickPhoto} />
             <span style={{ fontSize: '0.65rem', color: '#9ca3af', marginTop: '0.4rem' }}>Click to add photo</span>
           </div>
 
@@ -206,14 +212,15 @@ function AddEmployeeModal({ teamId, onClose, onAdd }: { teamId: string; onClose:
 
           <div style={{ display: 'flex', gap: '0.75rem' }}>
             <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', border: '1px solid #ddd', borderRadius: '8px', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>Cancel</button>
-            <button type="submit" disabled={saving || uploading}
-              style={{ flex: 1, padding: '0.55rem', border: 'none', borderRadius: '8px', background: '#1a1a1a', color: '#fff', cursor: (saving || uploading) ? 'default' : 'pointer', fontSize: '0.875rem', fontWeight: 600, opacity: (saving || uploading) ? 0.7 : 1 }}>
-              {uploading ? 'Uploading photo…' : saving ? 'Adding…' : 'Add Employee'}
+            <button type="submit" disabled={saving}
+              style={{ flex: 1, padding: '0.55rem', border: 'none', borderRadius: '8px', background: '#1a1a1a', color: '#fff', cursor: saving ? 'default' : 'pointer', fontSize: '0.875rem', fontWeight: 600, opacity: saving ? 0.7 : 1 }}>
+              {saving ? 'Adding…' : 'Add Employee'}
             </button>
           </div>
         </form>
       </motion.div>
     </div>
+    </>
   );
 }
 
